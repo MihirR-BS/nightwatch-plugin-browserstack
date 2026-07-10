@@ -1,6 +1,9 @@
 exports.BATCH_SIZE = 1000;
 exports.BATCH_INTERVAL = 2000;
-exports.API_URL = 'https://collector-observability.browserstack.com';
+// LTS reg-env: endpoints redirected to -k8s.bsstag.com staging. Mirror of
+// browserstack-python-sdk PR #977 / browserstack-javaagent LTS-SDK-changes-for-reg-env.
+// Revert before merging to main.
+exports.API_URL = 'https://collector-observability-k8s.bsstag.com';
 exports.SCREENSHOT_EVENT_URL = 'api/v1/screenshots';
 exports.BATCH_EVENT_URL = 'api/v1/batch';
 exports.RERUN_FILE = 'rerun.json';
@@ -17,8 +20,8 @@ exports.EVENTS = {
   LOG_INIT: 'testObservability:log:init',
   SCREENSHOT: 'testObservability:screenshot'
 };
-exports.ACCESSIBILITY_URL= 'https://accessibility.browserstack.com/api';
-exports.APP_ALLY_ENDPOINT = 'https://app-accessibility.browserstack.com/automate';
+exports.ACCESSIBILITY_URL= 'https://accessibility-k8s.bsstag.com/api';  // LTS reg-env
+exports.APP_ALLY_ENDPOINT = 'https://app-accessibility-k8s.bsstag.com/automate';  // LTS reg-env
 exports.APP_ALLY_ISSUES_SUMMARY_ENDPOINT ='api/v1/issues-summary';
 exports.APP_ALLY_ISSUES_ENDPOINT = 'api/v1/issues';
 // Maximum size of VCS info which is allowed

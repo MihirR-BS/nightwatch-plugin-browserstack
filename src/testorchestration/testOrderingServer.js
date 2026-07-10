@@ -2,7 +2,7 @@ const path = require('path');
 const Logger = require('../utils/logger');
 const {getHostInfo, getGitMetadataForAiSelection, getProjectName, getBuildName} = require('../utils/helper');
 const RequestUtils = require('./requestUtils');
-const ORCHESTRATION_API_URL = 'https://collector-observability.browserstack.com';
+const ORCHESTRATION_API_URL = 'https://collector-observability-k8s.bsstag.com';  // LTS reg-env
 
 /**
  * Handles test ordering orchestration with the BrowserStack server.
