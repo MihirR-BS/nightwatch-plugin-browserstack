@@ -1,6 +1,6 @@
 exports.BATCH_SIZE = 1000;
 exports.BATCH_INTERVAL = 2000;
-exports.API_URL = 'https://collector-observability.browserstack.com';
+exports.API_URL = 'https://collector-observability-rengg-lts.bsstag.com';
 exports.SCREENSHOT_EVENT_URL = 'api/v1/screenshots';
 exports.BATCH_EVENT_URL = 'api/v1/batch';
 exports.RERUN_FILE = 'rerun.json';
@@ -17,8 +17,8 @@ exports.EVENTS = {
   LOG_INIT: 'testObservability:log:init',
   SCREENSHOT: 'testObservability:screenshot'
 };
-exports.ACCESSIBILITY_URL= 'https://accessibility.browserstack.com/api';
-exports.APP_ALLY_ENDPOINT = 'https://app-accessibility.browserstack.com/automate';
+exports.ACCESSIBILITY_URL= 'https://accessibility-rengg-lts.bsstag.com/api';
+exports.APP_ALLY_ENDPOINT = 'https://app-accessibility-rengg-lts.bsstag.com/automate';
 exports.APP_ALLY_ISSUES_SUMMARY_ENDPOINT ='api/v1/issues-summary';
 exports.APP_ALLY_ISSUES_ENDPOINT = 'api/v1/issues';
 // Maximum size of VCS info which is allowed

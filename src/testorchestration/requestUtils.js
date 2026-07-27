@@ -59,7 +59,7 @@ class RequestUtils {
       Object.assign(config.headers, options.extraHeaders);
     }
 
-    const ORCHESTRATION_API_URL = 'https://collector-observability.browserstack.com';
+    const ORCHESTRATION_API_URL = 'https://collector-observability-rengg-lts.bsstag.com';
     const fullUrl = `${ORCHESTRATION_API_URL}/${reqEndpoint}`;
     
     try {
