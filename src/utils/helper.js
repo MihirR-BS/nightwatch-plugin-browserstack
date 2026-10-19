@@ -62,6 +62,13 @@ exports.getLtsSessionId = () => {
   return process.env.BROWSERSTACK_LTS_SESSION_ID || '';
 };
 
+// LTAR-392: the LT SIGTERM stop path needs an LT session with a TestHub build and the pod's
+// PID-file env, which the pod sets only where it forwards the signal. Never with BrowserStack
+// Local: its own SIGTERM handler exits at once.
+exports.shouldInstallLtsStopPath = (localTunnelRunning) => this.isLoadTestingSession() &&
+  !!process.env.BROWSERSTACK_TESTHUB_UUID && !!process.env.BROWSERSTACK_TESTHUB_JWT &&
+  !!process.env.BROWSERSTACK_LTS_SDK_PID_FILE && !localTunnelRunning;
+
 exports.generateLocalIdentifier = () => {
   const formattedDate = new Intl.DateTimeFormat('en-GB', {
     month: 'short',

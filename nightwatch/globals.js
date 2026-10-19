@@ -30,6 +30,10 @@ let currentTestUUID = '';
 let workerList = {};
 let testRunner = '';
 let testEventPromises = [];
+// LTAR-392: set once the pod's SIGTERM is being handled (LT stop path, below).
+let ltsStopping = false;
+// 'after' or 'signal': whichever starts first owns the sweep, the queue drain and the build stop.
+let teardownOwner = null;
 
 eventHelper.eventEmitter.on(EVENTS.LOG_INIT, (loggingData) => {
   const testCaseStartedId = loggingData.message.replace('TEST-OBSERVABILITY-PID-TESTCASE-MAPPING-', '').slice(1, -1);
@@ -297,6 +301,9 @@ module.exports = {
     });
 
     eventBroadcaster.on('TestRunStarted', async (test) => {
+      if (ltsStopping) {
+        return;
+      }
       process.env.VALID_ALLY_PLATFORM = process.env.BROWSERSTACK_APP_AUTOMATE ? accessibilityAutomation.validateAppA11yCaps(test.metadata.sessionCapabilities) : accessibilityAutomation.validateA11yCaps(browser);
       await accessibilityAutomation.beforeEachExecution(test);
       if (testRunner !== 'cucumber'){
@@ -321,6 +328,9 @@ module.exports = {
     });
 
     eventBroadcaster.on('TestRunFinished', async (test) => {
+      if (ltsStopping) {
+        return;
+      }
       const uuid = process.env.TEST_RUN_UUID || TestMap.getUUID(test);
       if (TestMap.hasTestFinished(uuid)) {
         Logger.debug(`Test with UUID ${uuid} already marked as finished, skipping duplicate TestRunFinished event`);
@@ -365,6 +375,11 @@ module.exports = {
 
         await accessibilityAutomation.afterEachExecution(test, uuid);
         if (testRunner !== 'cucumber'){
+          // LTAR-392: the SIGTERM landed while this handler awaited, and finished the run as
+          // `interrupted`; a real finish must not follow it for the same uuid.
+          if (ltsStopping && TestMap.hasTestFinished(uuid)) {
+            return;
+          }
           // Drain pending tags synchronously before the async sendTestRunEvent,
           // to avoid races where the next test's tags leak into pendingTestTags
           // and get drained into the wrong UUID.
@@ -435,6 +450,9 @@ module.exports = {
         settings.globals['customReporterCallbackTimeout'] = CUSTOM_REPORTER_CALLBACK_TIMEOUT;
         if (helper.isTestHubBuild(pluginSettings, true)) {
           await testObservability.launchTestSession();
+        }
+        if (helper.shouldInstallLtsStopPath(localTunnel._localTunnel?.isRunning())) {
+          installLtsStopPath();
         }
         if (process.env.BROWSERSTACK_RERUN === 'true' && process.env.BROWSERSTACK_RERUN_TESTS && process.env.BROWSERSTACK_RERUN_TESTS!=='null') {
           const specs = process.env.BROWSERSTACK_RERUN_TESTS.split(',');
@@ -545,6 +563,11 @@ module.exports = {
   },
 
   async after() {
+    // LTAR-392: the LT SIGTERM path already owns the sweep, the drain and the build stop.
+    if (teardownOwner === 'signal') {
+      return;
+    }
+    teardownOwner = 'after';
     localTunnel.stop();
     
     // Collect build data for test orchestration if enabled
@@ -748,6 +771,87 @@ const performTeardownSweep = async () => {
 // literal above) so unit tests can drive the sweep directly without relocating the
 // const, which is referenced by the teardown closures earlier in the literal.
 module.exports.performTeardownSweep = performTeardownSweep;
+
+// LTAR-392, the LT stop path (draft surface row NW1). When the pod cuts a run (a stop, a timeout,
+// or its own end-of-duration cut) it SIGTERMs the PID in BROWSERSTACK_LTS_SDK_PID_FILE, and only
+// that PID. The handler finishes every open run `interrupted`, drains the queue, sends those
+// finishes, stops the build and exits 143, all within D. It never touches the browser.
+// ponytail: D and T_req are the spec's placeholders (D-16); M1 (X #14) sets both to p99 + margin,
+// and D must stay below the pod's forward waits W and W_end.
+const LTS_STOP_DEADLINE_MS = 8000;
+const LTS_REQUEST_TIMEOUT_MS = 2000;
+const LTS_SIGTERM_EXIT_CODE = 143;
+
+const onLtsSigterm = async () => {
+  ltsStopping = true;
+  // after()'s own process.exit() then reports the signal too.
+  process.exitCode = LTS_SIGTERM_EXIT_CODE;
+  // When D runs out, what is still unsent drops from the end: the build stop, then the interrupted
+  // finishes (D-40). Each leaves today's outcome: an open build, a `pending` test.
+  setTimeout(() => process.exit(LTS_SIGTERM_EXIT_CODE), LTS_STOP_DEADLINE_MS);
+  // after() started first, or this is a second signal: only the deadline above applies.
+  if (teardownOwner) {
+    return;
+  }
+  teardownOwner = 'signal';
+  try {
+    const finishedAt = new Date().toISOString();
+    const interrupted = [];
+    for (const run of TestMap.getOpenRuns()) {
+      // Marked first, so neither a late real finish nor a teardown sweep can write over it.
+      TestMap.markTestFinished(run.uuid);
+      try {
+        if (run.startedPayload) {
+          interrupted.push(testObservability.buildInterruptedTestRun(run.startedPayload, finishedAt));
+        }
+      } catch (error) {
+        Logger.debug(`LTS: could not build the interrupted finish for ${run.uuid}: ${error.message}`);
+      }
+    }
+    await Promise.allSettled(testEventPromises);
+    await helper.shutDownRequestHandler(LTS_REQUEST_TIMEOUT_MS);
+    // After the drain, and before the build stop, which blacklists the build JWT.
+    await testObservability.sendInterruptedTestRuns(interrupted, LTS_REQUEST_TIMEOUT_MS);
+    await testObservability.stopBuildUpstream(LTS_REQUEST_TIMEOUT_MS);
+  } catch (error) {
+    Logger.debug(`LTS: stop path failed: ${error.message}`);
+  }
+  process.exit(LTS_SIGTERM_EXIT_CODE);
+};
+
+const installLtsStopPath = () => {
+  const pidFile = process.env.BROWSERSTACK_LTS_SDK_PID_FILE;
+  const tmpFile = `${pidFile}.tmp`;
+  try {
+    fs.writeFileSync(tmpFile, String(process.pid));
+    // Whatever the umask: the pod's root has no CAP_DAC_OVERRIDE and reads it as "other".
+    fs.chmodSync(tmpFile, 0o644);
+    // Atomic, so the pod never reads a partial PID.
+    fs.renameSync(tmpFile, pidFile);
+  } catch (error) {
+    // Without the PID file the pod does not forward the signal: stay on today's path.
+    Logger.debug(`LTS: could not write the PID file, stop path not installed: ${error.message}`);
+
+    return;
+  }
+  process.on('exit', () => {
+    try {
+      fs.unlinkSync(pidFile);
+    } catch (error) {
+      // already gone
+    }
+  });
+  // The pod's log pipe can close before the flush ends, and Nightwatch exits 1 on an uncaught error.
+  const ignoreEpipe = (error) => {
+    if (error.code !== 'EPIPE') {
+      throw error;
+    }
+  };
+  process.stdout.on('error', ignoreEpipe);
+  process.stderr.on('error', ignoreEpipe);
+  process.on('SIGTERM', onLtsSigterm);
+};
+module.exports.installLtsStopPath = installLtsStopPath;
 
 const cucumberPatcher = () => {
   try {
