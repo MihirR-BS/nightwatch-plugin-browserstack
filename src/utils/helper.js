@@ -862,8 +862,8 @@ exports.uploadPending = async (
   return this.uploadPending(waitTimeout - waitInterval);
 };
 
-exports.shutDownRequestHandler = async () => {
-  await requestQueueHandler.shutdown();
+exports.shutDownRequestHandler = async (timeout) => {
+  await requestQueueHandler.shutdown(timeout);
 };
 
 exports.getScenarioExamples = (gherkinDocument, scenario) => {
