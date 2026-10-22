@@ -619,13 +619,15 @@ describe('globals - LT SIGTERM path (LTAR-392)', function () {
 
     it('suppresses a TestRunFinished already past its entry check when the signal lands', async function () {
       const uuid = await startTest('finish in flight');
-      const sessionStatus = deferred();
-      global.browser.execute = sandbox.stub().returns(sessionStatus.promise);
+      // Hold the handler at its last await before the stop check. LTS runs skip
+      // the setSessionStatus executor (LTAR-420), so afterEachExecution is it.
+      const afterEach = deferred();
+      AccessibilityAutomation.prototype.afterEachExecution.returns(afterEach.promise);
       const finishing = handlers['TestRunFinished'](buildTest('finish in flight'));
       await flush();
 
       await sigterm();
-      sessionStatus.resolve();
+      afterEach.resolve();
       await finishing;
 
       assert.strictEqual(uploads.filter((u) => u.event_type === 'TestRunFinished' && u.test_run.uuid === uuid).length, 0,
